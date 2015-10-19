@@ -1,0 +1,124 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "BDW"
+date: "10/18/2015"
+output: html_document
+---
+
+This is the course project for the Practical Machine Learning course on Coursera.  The purpose of this project is to determine the manner in which peple did their exercise using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+## Load Packages
+First we load packages that we will need and set seed for reproducibility.
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+set.seed(1253)
+```
+
+## Data Loading and Cleaning
+
+The training and testing data are available from here:
+```{r}
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+```
+
+The data was then loaded into memory.
+```{r}
+fullTrain <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+fullTest <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+```
+
+After looking at the data, any column that has NAs, appear to have a very high percentage (over 97%), so we will remove any column containing an NA.
+```{r}
+fullTrain <- fullTrain[, colSums(is.na(fullTrain)) == 0] 
+fullTest <- fullTest[, colSums(is.na(fullTest)) == 0]
+```
+
+We remove the first seven columns, as they contain no useful perdictive information.
+```{r}
+fullTrain <- fullTrain[,8:length(colnames(fullTrain))]
+fullTest <- fullTest[,8:length(colnames(fullTest))]
+```
+
+We confirm whether any variables have zero variance with the following code, but since no variables have zeo variance, none further are removed.
+```{r, results='hide'}
+myDataNZV <- nearZeroVar(fullTrain, saveMetrics=TRUE)
+```
+
+Finally, we confirm that the column names are the same for both the training and test set (except the last column, which is classe in the training set and problemid in the testing set.
+```{r}
+colnames_train <- colnames(fullTrain)
+colnames_test <- colnames(fullTest)
+all.equal(colnames_train[1:length(colnames_train)-1], colnames_test[1:length(colnames_train)-1])
+```
+
+We will now partition our data into a training and test set with which we can test our algothirim.
+```{r}
+inTrain <- createDataPartition(fullTrain$classe, p=0.65, list=FALSE)
+smallTrain<- fullTrain[inTrain, ]
+smallTest <- fullTrain[-inTrain, ]
+dim(smallTrain); dim(smallTest)
+```
+
+## Attempt 1: Classification Tree
+
+We first attempted a standard classification tree on our training set, and used 5-fold cross validation to tune the complexity parameter "cp".
+```{r}
+treeMod <- train(classe~., data=smallTrain, method="rpart", trControl=trainControl(method = "cv", number = 5))
+```
+
+As the model plot shows, the final model is likely too simple to be effective, especially as one of the classification types, "D", is not even an option.
+
+```{r}
+fancyRpartPlot(treeMod$finalModel)
+```
+
+As expected, when we apply the tree model against our test set, we have a low accuracy of only 49% (and an out-of-sample error of 51%).
+```{r}
+treePredict <- predict(treeMod, smallTest)
+confusionMatrix(treePredict, smallTest$classe)
+```
+
+## Attempt 1: Random Forest
+
+We then attempted a random foresst on our training set, and used 5-fold cross validation to tune the number of variables randomly sampled as candidates at each split ("mtry").
+```{r}
+rfMod <- train(classe~., data=smallTrain, method="rf", trControl=trainControl(method="cv", number = 5))
+```
+
+Cross validation identified 2 as the optimal number of predictors at each split.
+```{r}
+plot(rfMod)
+```
+
+When the random forest model is applied to test set, it has a very high accuracy (99.3%) and a very low out-of-sample error rate (0.7%).
+```{r}
+rfPredict <- predict(rfMod, smallTest)
+confusionMatrix(rfPredict, smallTest$classe)
+```
+
+Random forest, as expected, produced the more accurate model and is the one we used on the full test data.
+
+## Predictions for the Full Test Data
+
+We first generate the predictions.
+```{r}
+rfFullPredict <- predict(rfMod, fullTest)
+```
+
+Then we use the function on the course page to create the 20 txt files.
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(rfFullPredict)
+```
